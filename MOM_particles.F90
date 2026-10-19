@@ -194,10 +194,10 @@ subroutine particles_run(parts, time, uo, vo, ho, tv, dt_adv, use_uh)
 
   ! For convenience
   grd=>parts%grd
+
 !  grd%u_particle(:,:)=0.
 !  grd%v_particle(:,:)=0.
 
-  call generate_if_time(parts, time)
   !Initializing _on_ocean_fields
 !  grd%Uvel_on_ocean(:,:,:)=0. ;   grd%Vvel_on_ocean(:,:,:)=0.
 
@@ -205,6 +205,8 @@ subroutine particles_run(parts, time, uo, vo, ho, tv, dt_adv, use_uh)
   call get_date(time, iyr, imon, iday, ihr, imin, isec)
   parts%current_year=iyr
   parts%current_yearday=yearday(iyr, imon, iday, ihr, imin, isec)
+
+  call generate_if_time(parts, time)
   ! Turn on sampling of trajectories, verbosity, budgets
   sample_traj=.false.
   if ( (parts%traj_sample_hrs>0)  .and. (.not. parts%ignore_traj) ) then
@@ -242,9 +244,18 @@ subroutine particles_run(parts, time, uo, vo, ho, tv, dt_adv, use_uh)
       grd%vo(:,:,k) = vo(:,:,k)*grd%dx(:,:)
     enddo
   endif
-  do k=2,grd%ke
-      grd%hdepth(grd%isd:grd%ied,grd%jsd:grd%jed,k) = grd%hdepth(grd%isd:grd%ied,grd%jsd:grd%jed,k-1)+ho(grd%isd:grd%ied,grd%jsd:grd%jed,k)
+
+  ! Rebuild cumulative depths using the current layer thicknesses.
+  ! Update layer 1 before accumulating the deeper layers.
+  grd%hdepth(grd%isd:grd%ied, grd%jsd:grd%jed, 1) = &
+      ho(grd%isd:grd%ied, grd%jsd:grd%jed, 1)
+
+  do k = 2, grd%ke
+    grd%hdepth(grd%isd:grd%ied, grd%jsd:grd%jed, k) = &
+        grd%hdepth(grd%isd:grd%ied, grd%jsd:grd%jed, k-1) + &
+        ho(grd%isd:grd%ied, grd%jsd:grd%jed, k)
   enddo
+
   parts%dt = dt_adv
   if (debug) call parts_chksum(parts, 'run parts (top)')
   if (debug) call checksum_gridded(parts%grd, 'top of s/r run')
@@ -252,7 +263,7 @@ subroutine particles_run(parts, time, uo, vo, ho, tv, dt_adv, use_uh)
   !Move to k-space if not already
   call particles_to_k_space(parts,ho)
 
-  if (parts%initial_traj) then 
+  if (parts%initial_traj) then
        call record_posn(parts, ho, tv%T, tv%S)
        parts%initial_traj=.False.
   endif
@@ -284,7 +295,7 @@ end subroutine particles_run
 subroutine particles_to_k_space(parts,h)
    ! Arguments
    type(particles), pointer :: parts !< Container for all types and memory
-   real, dimension(:,:,:),intent(in)      :: h !< Thickness of layers 
+   real, dimension(:,:,:),intent(in)      :: h !< Thickness of layers
    !Local variables
    type(particles_gridded), pointer :: grd
    type(particle), pointer :: part
@@ -292,7 +303,7 @@ subroutine particles_to_k_space(parts,h)
 
    integer :: stdlogunit, stderrunit
 
-   ! Get the stderr and stdlog unit numbers                                     
+   ! Get the stderr and stdlog unit numbers
    stderrunit=stderr()
 
 
@@ -302,6 +313,7 @@ subroutine particles_to_k_space(parts,h)
    do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
     part=>parts%list(grdi,grdj)%first
     do while (associated(part)) ! loop over all parts
+
     call find_layer(grd, part%depth, h, part%k, part%ine,part%jne, part%xi,part%yj, part%k_space)
     part=>part%next
     enddo
@@ -314,9 +326,9 @@ end subroutine particles_to_k_space
 !> Checks whether all particles are in k-space and if not, moves them to k-space
 
 subroutine particles_to_z_space(parts,h)
-   ! Arguments                                                                 
+   ! Arguments
    type(particles), pointer :: parts !< Container for all types and memory
-   real, dimension(:,:,:),intent(in)      :: h !< Thickness of layers 
+   real, dimension(:,:,:),intent(in)      :: h !< Thickness of layers
    !Local variables
    type(particles_gridded), pointer :: grd
    type(particle), pointer :: part
@@ -328,12 +340,12 @@ subroutine particles_to_z_space(parts,h)
    ! Get the stderr and stdlog unit numbers
    stderrunit=stderr()
 
-   ! For convenience 
+   ! For convenience
    grd=>parts%grd
 
    do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
     part=>parts%list(grdi,grdj)%first
-    do while (associated(part)) ! loop over all parts 
+    do while (associated(part)) ! loop over all parts
     call find_depth(grd, part%k, h, part%depth, part%ine,part%jne, part%xi,part%yj, part%k_space)
     part=>part%next
     enddo
@@ -389,14 +401,14 @@ subroutine evolve_particles(parts)
         if (debug) call check_position(grd, part, 'evolve_particle (top)')
 !       Interpolate gridded velocity fields to part and generate uvel and vvel
         call interp_flds(grd,part%ine,part%jne,part%k,part%xi,part%yj,part%uvel, part%vvel, part%lon, part%lat)
-          !Time stepping schemes:       
+          !Time stepping schemes:
         !call Runge_Kutta_stepping(parts,part, uveln, vveln,lonn, latn, i, j, xi, yj)
         if (xystagger) then
            call Runge_Kutta_xystagger(parts,part, uveln, vveln,lonn, latn, i, j, xi, yj)
         else
            call Runge_Kutta_stepping(parts,part, uveln, vveln,lonn, latn, i, j, xi, yj)
         endif
-        
+
         part%uvel=uveln
         part%vvel=vveln
 
@@ -491,7 +503,7 @@ subroutine Runge_Kutta_stepping(parts, part, uveln, vveln, lonn, latn, i, j, xi,
 
   !  X2 = X1+dt/2*V1 ; V2 = V1+dt/2*A1; A2=A(X2)
   call Runge_Kutta_step(parts, part, dt_2, x1, y1, x2, y2, xdot1, ydot1, xdot2, ydot2, lon1, lat1, lon2, lat2, u1,v1, i1, j1, i, j, xi, yj, u2, v2, reg_dldx, on_tangential_plane)
-  
+
   !  X3 = X1+dt/2*V2 ; V3 = V1+dt/2*A2; A3=A(X3)
   call Runge_Kutta_step(parts, part, dt_2, x1, y1, x3, y3, xdot2, ydot2, xdot3, ydot3, lon1, lat1, lon3, lat3, u2,v2, i1, j1, i, j, xi, yj, u3, v3, reg_dldx, on_tangential_plane)
 
@@ -516,6 +528,9 @@ subroutine Runge_Kutta_stepping(parts, part, uveln, vveln, lonn, latn, i, j, xi,
     vveln=part%vvel
   endif
   i=i1;j=j1;xi=part%xi;yj=part%yj
+  call check_particle_finite_debug( &
+     'RK final: lonn, latn, uveln, vveln', part, &
+     (/lonn, latn, uveln, vveln/))
   call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced, error_flag, part%id)
 end subroutine Runge_Kutta_stepping
 
@@ -648,10 +663,10 @@ subroutine Runge_Kutta_xystagger(parts, part, uveln, vveln, lonn, latn, i, j, xi
 
 
   lon1=part%lon; lat1=part%lat
-  if (on_tangential_plane) call rotpos_to_tang(lon1,lat1,x1,y1) 
+  if (on_tangential_plane) call rotpos_to_tang(lon1,lat1,x1,y1)
   call convert_from_meters_to_grid(lat1,parts%grd%grid_is_latlon,parts%grd%grid_is_regular,dxdl1,dydl,reg_dldx)
-  call interp_flds(grd, i, j, part%k, xi, yj, uvel1, vvel1, lon1, lat1) 
-  if (on_tangential_plane) then 
+  call interp_flds(grd, i, j, part%k, xi, yj, uvel1, vvel1, lon1, lat1)
+  if (on_tangential_plane) then
     call rotvec_to_tang(lon1,uvel1,vvel1,xdot1,ydot1)
     ydot1=0.0
   else
@@ -705,6 +720,10 @@ subroutine Runge_Kutta_xystagger(parts, part, uveln, vveln, lonn, latn, i, j, xi
   endif
 
   i=i1;j=j1;xi=part%xi;yj=part%yj
+  call check_particle_finite_debug( &
+     'RK final: lonn, latn, uveln, vveln', part, &
+     (/lonn, latn, uveln, vveln/))
+
   call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced, error_flag, part%id)
 end subroutine Runge_xtheny_step
 
@@ -776,7 +795,7 @@ end subroutine Runge_xtheny_step
   if (on_tangential_plane) call rotpos_to_tang(lon1,lat1,x1,y1)
   call convert_from_meters_to_grid(lat1,parts%grd%grid_is_latlon,parts%grd%grid_is_regular,dxdl1,dydl,reg_dldx)
   call interp_flds(grd, i, j, part%k, xi, yj, uvel1, vvel1,lon1,lat1)
-  
+
   if (on_tangential_plane) then
     call rotvec_to_tang(lon1,uvel1,vvel1,xdot1,ydot1)
     xdot1=0.0
@@ -832,6 +851,10 @@ end subroutine Runge_xtheny_step
   endif
 
   i=i1;j=j1;xi=part%xi;yj=part%yj
+  call check_particle_finite_debug( &
+     'RK final: lonn, latn, uveln, vveln', part, &
+     (/lonn, latn, uveln, vveln/))
+
   call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced, error_flag, part%id)
 end subroutine Runge_ythenx_step
 
@@ -877,6 +900,9 @@ subroutine Runge_Kutta_step(parts, part, dt, xa, ya, xb, yb, xdota, ydota, xdotb
   stderrunit = stderr()
   grd=>parts%grd
 
+  call check_particle_finite_debug( &
+     'RK input: lona, lata, dt', part, &
+     (/lona, lata, dt/))
   !  X2 = X1+dt/2*V1 ; V2 = V1+dt/2*A1; A2=A(X2)
   if (on_tangential_plane) then
     xb=xa+dt*xdota; yb=ya+dt*ydota
@@ -886,6 +912,9 @@ subroutine Runge_Kutta_step(parts, part, dt, xa, ya, xb, yb, xdota, ydota, xdotb
   endif
   bounced = .false.
   i=ia;j=ja;xi=part%xi;yj=part%yj
+  call check_particle_finite_debug( &
+     'RK before adjust: lonb, latb, ua, va', part, &
+     (/lonb, latb, ua, va/))
   call adjust_index_and_ground(grd, lonb, latb, ua, va, i, j, xi, yj, bounced, error_flag, part%id)
 
 !  if (.not.error_flag) then
@@ -893,10 +922,51 @@ subroutine Runge_Kutta_step(parts, part, dt, xa, ya, xb, yb, xdota, ydota, xdotb
 !  endif
   call convert_from_meters_to_grid(latb,parts%grd%grid_is_latlon,parts%grd%grid_is_regular,dxdl2,dydl,reg_dldx)
   call interp_flds(grd, i, j, part%k, xi, yj, uvel2, vvel2,lonb,latb)
+  call check_particle_finite_debug( &
+     'RK after interpolation: uvel2, vvel2', part, &
+     (/uvel2, vvel2/))
   if (on_tangential_plane) call rotvec_to_tang(lonb,uvel2,vvel2,xdotb,ydotb)
   ub=uvel2*dxdl2; vb=vvel2*dydl
 
 end subroutine Runge_Kutta_step
+
+subroutine check_particle_finite_debug(stage, part, values)
+
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+
+  character(len=*), intent(in) :: stage
+  type(particle), pointer, intent(in) :: part
+  real, intent(in) :: values(:)
+
+  integer :: logunit
+
+  if (all(ieee_is_finite(values))) return
+
+  logunit = stderr()
+
+  write(logunit,*) '========== PARTICLE ERROR =========='
+  write(logunit,*) 'Stage: ', trim(stage)
+  write(logunit,*) 'PE: ', mpp_pe()
+  write(logunit,*) 'Internal ID: ', part%id
+  write(logunit,*) 'drifter_num: ', part%drifter_num
+
+  write(logunit,*) 'Stored lon, lat, depth: ', &
+       part%lon, part%lat, part%depth
+
+  write(logunit,*) 'Stored uvel, vvel: ', &
+       part%uvel, part%vvel
+
+  write(logunit,*) 'Stored ine, jne, k: ', &
+       part%ine, part%jne, part%k
+
+  write(logunit,*) 'Checked values: ', values
+
+  flush(logunit)
+
+  call error_mesg('particle diagnostic', &
+       'Non-finite value detected; see Stage in log', FATAL)
+
+end subroutine check_particle_finite_debug
 
 ! ###############################################################################
 !> Calculate longitude-latitude from tangent plane coordinates

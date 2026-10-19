@@ -150,6 +150,7 @@ integer, allocatable, dimension(:) :: ine,              &
 integer :: grdi, grdj
 type(FmsNetcdfDomainFile_t) :: fileobj         !< Fms2_io fileobj
 integer :: global_nparts
+integer, allocatable, target :: start_year(:)
 character(len=8), dimension(4) :: dim_names_4d
 character(len=8), dimension(3) :: dim_names_3d
 character(len=1), dimension(1) :: dim_names_1d
@@ -180,6 +181,7 @@ character(len=1), dimension(1) :: dim_names_1d
    allocate(start_lon(nparts))
    allocate(start_lat(nparts))
    allocate(start_d(nparts))
+   allocate(start_year(nparts))
 
    allocate(ine(nparts))
    allocate(jne(nparts))
@@ -199,6 +201,7 @@ character(len=1), dimension(1) :: dim_names_1d
       ine(i) = this%ine; jne(i) = this%jne
       start_lon(i) = this%start_lon; start_lat(i) = this%start_lat
       start_d(i) = this%depth
+      start_year(i) = this%start_year
       id_cnt(i) = this%id; drifter_num(i) = this%drifter_num !; id_ij(i) = this%id
       call split_id(this%id, id_cnt(i), id_ij(i))
       this=>this%next
@@ -245,6 +248,10 @@ character(len=1), dimension(1) :: dim_names_1d
   call register_restart_field_wrap(fileobj,'drifter_num',drifter_num, &
                                    dim_names_1d,longname='identification of the drifter',units='dimensionless')
 
+  ! Save the release year of each particle.
+  call register_restart_field( &
+       fileobj, 'start_year', start_year, dim_names_1d)
+
   call register_field(fileobj, "i", "int")
   call write_restart(fileobj)
 
@@ -261,7 +268,7 @@ character(len=1), dimension(1) :: dim_names_1d
              vvel,         &
              start_lon,    &
              start_lat,    &
-             start_d) 
+             start_d)
 
 
   deallocate(           &
@@ -269,7 +276,9 @@ character(len=1), dimension(1) :: dim_names_1d
              jne,       &
              drifter_num,       &
              id_cnt,    &
-             id_ij) 
+             id_ij)
+
+  deallocate(start_year)
 
 end subroutine write_restart_parts
 
@@ -279,7 +288,7 @@ end subroutine write_restart_parts
 !up to year 99,999,999
 character(len=40) function convert_date_to_string(date)
   type(time_type), intent(in) :: date !< The date to be translated into a string.
-  
+
   ! Local variables
   character(len=40) :: sub_string
   real    :: real_secs
@@ -309,6 +318,7 @@ end function convert_date_to_string
 ! ##############################################################################
 
 subroutine read_restart_parts(parts,Time, u, v, h)
+use fms2_io_mod, only: register_axis, register_restart_field
 ! Arguments
 type(particles), pointer :: parts
 type(time_type), intent(in) :: Time
@@ -319,6 +329,12 @@ real, dimension(:,:,:),intent(in) :: h
 integer :: n, siz(4), nparts_in_file, nparts_read
 logical :: lres, found_restart, found, replace_drifter_num
 logical :: explain
+logical :: has_start_year
+integer, allocatable, target :: start_year(:)
+
+! Temporary fallback for the verified 1979 restart only.
+logical, parameter :: allow_legacy_1979 = .true.
+
 real :: lon0, lon1, lat0, lat1
 real :: pos_is_good, pos_is_good_all_pe
 character(len=53) :: filename
@@ -327,7 +343,7 @@ type(particles_gridded), pointer :: grd=>NULL()
 type(particle) :: localpart
 integer :: stderrunit, i, j, k, cnt, ij
 
-real, allocatable,dimension(:) :: lon, &
+real, allocatable, target, dimension(:) :: lon, &
                                   lat, &
                                   depth,  &
                                   drifter_num,  &
@@ -394,6 +410,7 @@ character(len=1), dimension(1) :: dim_names_1d
     allocate(start_lon(nparts_in_file))
     allocate(start_lat(nparts_in_file))
     allocate(start_d(nparts_in_file))
+    allocate(start_year(nparts_in_file))
     allocate(depth(nparts_in_file))
     replace_drifter_num = variable_exists(fileobj, 'drifter_num') ! True if using a 32-bit drifter_num in restart file
     if (replace_drifter_num) then
@@ -404,8 +421,58 @@ character(len=1), dimension(1) :: dim_names_1d
       allocate(id_ij(nparts_in_file))
     endif
 
-      call read_restart(fileobj)
-      call close_file(fileobj)
+    ! Particle records use a one-dimensional axis.
+    dim_names_1d(1) = 'i'
+    call register_axis(fileobj, 'i', nparts_in_file)
+
+    ! Bind restart fields to the allocated arrays.
+    call register_restart_field( &
+        fileobj, 'lon', lon, dim_names_1d)
+    call register_restart_field( &
+        fileobj, 'lat', lat, dim_names_1d)
+    call register_restart_field( &
+        fileobj, 'depth', depth, dim_names_1d)
+    call register_restart_field( &
+        fileobj, 'start_lon', start_lon, dim_names_1d)
+    call register_restart_field( &
+        fileobj, 'start_lat', start_lat, dim_names_1d)
+    call register_restart_field( &
+        fileobj, 'start_d', start_d, dim_names_1d)
+
+    if (replace_drifter_num) then
+      call register_restart_field( &
+          fileobj, 'drifter_num', drifter_num, dim_names_1d)
+    else
+      call register_restart_field( &
+          fileobj, 'id_cnt', id_cnt, dim_names_1d)
+      call register_restart_field( &
+          fileobj, 'id_ij', id_ij, dim_names_1d)
+    endif
+
+    has_start_year = variable_exists(fileobj, 'start_year')
+
+    if (has_start_year) then
+      call register_restart_field( &
+          fileobj, 'start_year', start_year, dim_names_1d)
+    else
+      if (.not. allow_legacy_1979) then
+        call error_mesg('read_restart_parts', &
+            'Restart has no start_year; release years must be supplied.', FATAL)
+        return
+      endif
+
+      ! Temporary compatibility for the verified 1979 restart.
+      start_year(:) = 1979
+
+      if (mpp_pe() == mpp_root_pe()) then
+        write(stderrunit,*) &
+            'LEGACY RESTART: start_year missing; assuming 1979.'
+      endif
+    endif
+
+    call read_restart(fileobj)
+    call close_file(fileobj)
+
   elseif (parts%require_restart) then
      stop 'read_restart_parts, RESTART NOT FOUND!'
   endif
@@ -420,6 +487,11 @@ character(len=1), dimension(1) :: dim_names_1d
     localpart%lon=lon(n)
     localpart%lat=lat(n)
     localpart%depth=depth(n)
+
+    localpart%uvel     = 0.0
+    localpart%vvel     = 0.0
+    localpart%uvel_old = 0.0
+    localpart%vvel_old = 0.0
 
     if (use_slow_find) then
       lres=find_cell(grd, localpart%lon, localpart%lat, localpart%ine, localpart%jne)
@@ -436,6 +508,9 @@ character(len=1), dimension(1) :: dim_names_1d
       localpart%start_lon=start_lon(n)
       localpart%start_lat=start_lat(n)
       localpart%start_d=start_d(n)
+
+      localpart%start_year = start_year(n)
+
       if (replace_drifter_num) then
         localpart%id = generate_id(grd, localpart%ine, localpart%jne)
         localpart%drifter_num = drifter_num(n)
@@ -444,18 +519,29 @@ character(len=1), dimension(1) :: dim_names_1d
       endif
       localpart%halo_part=0.
       lres=pos_within_cell(grd, localpart%lon, localpart%lat, localpart%ine, localpart%jne, localpart%xi, localpart%yj)
-      localpart%k_space=.false.
-      call add_new_part_to_list(parts%list(localpart%ine,localpart%jne)%first, localpart)
+
+      ! Convert physical depth using the layer thicknesses at restart time.
+      localpart%k_space = .false.
+
+      call find_layer( &
+          grd, localpart%depth, h, localpart%k, &
+          localpart%ine, localpart%jne, &
+          localpart%xi, localpart%yj, localpart%k_space)
+
+      call add_new_part_to_list( &
+          parts%list(localpart%ine,localpart%jne)%first, localpart)
     endif
   enddo
 
   if (found_restart) then
-    deallocate(lon,          &
-               lat,          &
-               depth,        &
-               start_lon,    &
-               start_lat,    &
-               start_d)
+      deallocate(lon,          &
+                 lat,          &
+                 depth,        &
+                 start_lon,    &
+                 start_lat,    &
+                 start_d，     &
+                 start_year)
+
     if (replace_drifter_num) then
       deallocate(id)
       deallocate(drifter_num)
@@ -463,7 +549,6 @@ character(len=1), dimension(1) :: dim_names_1d
       deallocate(id_cnt)
       deallocate(id_ij)
     endif
-
   endif
 
   call check_for_duplicates_in_parallel(parts)

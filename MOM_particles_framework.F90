@@ -33,7 +33,7 @@ use diag_manager_mod, only: diag_axis_init
 implicit none ; private
 
 integer :: buffer_width=21 ! size of buffer dimension for comms
-integer :: buffer_width_traj=18  
+integer :: buffer_width_traj=18
 logical :: folded_north_on_pe = .false. !< If true, indicates the presence of the tri-polar grid
 logical :: verbose=.false. !< Be verbose to stderr
 logical :: debug=.false. !< Turn on debugging
@@ -305,7 +305,7 @@ subroutine particles_framework_init(parts, Grid, Time, dt)
          restart_input_dir, old_bug_bilin,do_unit_tests, force_all_pes_traj, &
          grid_is_latlon,Lx, no_TS, TS_interp, &
          grid_is_regular, &
-         generate_days, generate_monthly, mon_counter, &
+         generate_days, generate_monthly, mon_counter, num, &
          generate_lons, generate_lats, generate_d, &
          ignore_traj, initial_traj, debug_particle_with_id, read_old_restarts
 
@@ -331,6 +331,9 @@ subroutine particles_framework_init(parts, Grid, Time, dt)
 
   ! Allocate memory
   allocate(parts)
+
+  ! Last assigned drifter number; new particles increment from here.
+  parts%num = num
 
   grd=>parts%grd
   grd%domain => Grid%domain%mpp_domain
@@ -557,26 +560,30 @@ subroutine generate_if_time(parts, Time)
   logical :: lerr, lgenerate
   ! Generate a grid of particles if requested
   call get_date(Time, iyr, imon, iday, ihr, imin, isec)
-  if (3600*ihr + 60*imin +isec == 0) then ! Make sure we are on a day boundary
-    lgenerate = .false.
-    if (parts%generate_monthly)then
-      !write(stderrunit,*) 'Lat not defined properly', imon, mon_counter
-      if (imon==parts%mon_counter)then
-              lgenerate=.true.
-              parts%mon_counter=parts%mon_counter+1
-       endif
-    elseif (parts%generate_days>0) then
-      if ( mod(365*(iyr-1)+iday-1, parts%generate_days)==0 ) lgenerate = .true.
-    elseif (parts%generate_days==0) then ! .and. 365*(iyr-1)+iday-1==0) then
-      lgenerate = .true.
+
+  ! Update the date before deciding whether to generate particles.
+  parts%current_year = iyr
+  parts%current_yearday = yearday(iyr, imon, iday, ihr, imin, isec)
+
+  lgenerate = .false.
+  if (parts%generate_monthly)then
+    if (imon==parts%mon_counter)then
+      lgenerate=.true.
+      parts%mon_counter=parts%mon_counter+1
     endif
-    if (lgenerate) then
-       call generate_grid_of_particles(parts, &
-                          parts%generate_lons(1), parts%generate_lons(2), parts%generate_lons(3), &
-                          parts%generate_lats(1), parts%generate_lats(2), parts%generate_lats(3), &
-                          parts%generate_d(1), parts%generate_d(2), parts%generate_d(3))
-    endif
-  endif
+   elseif (parts%generate_days>0) then
+     if ( mod(365*(iyr-1)+iday-1, parts%generate_days)==0 ) lgenerate = .true.
+   elseif (parts%generate_days==0) then ! .and. 365*(iyr-1)+iday-1==0) then
+     lgenerate = .true.
+   endif
+
+   if (lgenerate) then
+     call generate_grid_of_particles(parts, &
+         parts%generate_lons(1), parts%generate_lons(2), parts%generate_lons(3), &
+         parts%generate_lats(1), parts%generate_lats(2), parts%generate_lats(3), &
+         parts%generate_d(1), parts%generate_d(2), parts%generate_d(3))
+   endif
+ endif
 
 end subroutine generate_if_time
 
@@ -624,6 +631,7 @@ integer :: stderrunit
   !localpart%k_space=.true.
   !localpart%k=0.5
   !num = 0
+
   do d = 0,de
      if (d_end<0) then
         localpart%k_space=.true.
@@ -642,9 +650,20 @@ integer :: stderrunit
            if (lres) then
              if (grd%msk(localpart%ine,localpart%jne)>-1.) then
                localpart%drifter_num = parts%num
-               localpart%id = generate_id(grd, localpart%ine, localpart%jne)
-               lres=pos_within_cell(grd, localpart%lon, localpart%lat,localpart%ine,localpart%jne, localpart%xi, localpart%yj)
-               call add_new_part_to_list(parts%list(localpart%ine,localpart%jne)%first, localpart)
+               localpart%id = generate_id( &
+                   grd, localpart%ine, localpart%jne)
+
+               ! Record the release date when creating a new particle.
+               localpart%start_year = parts%current_year
+               localpart%start_day = parts%current_yearday
+
+               lres = pos_within_cell( &
+                   grd, localpart%lon, localpart%lat, &
+                   localpart%ine, localpart%jne, &
+                   localpart%xi, localpart%yj)
+
+               call add_new_part_to_list( &
+                   parts%list(localpart%ine,localpart%jne)%first, localpart)
              endif
            endif
          enddo
@@ -1726,7 +1745,7 @@ end subroutine increase_ibuffer
     traj%lat=buff%data(2,n)
 !    traj%year=nint(buff%data(3,n))
     traj%day=buff%data(3,n)
-    traj%year=buff%data(4,n) 
+    traj%year=buff%data(4,n)
     cnt = nint(buff%data(5,n))
     ij = nint(buff%data(6,n))
     traj%id = id_from_2_ints(cnt, ij)
@@ -1739,7 +1758,7 @@ end subroutine increase_ibuffer
     traj%lon_old=buff%data(13,n) !Alon
     traj%lat_old=buff%data(14,n) !Alon
     traj%particle_num=buff%data(15,n)
-    traj%k=buff%data(16,n) 
+    traj%k=buff%data(16,n)
     traj%k_space=buff%data(17,n)
     traj%depth=buff%data(18,n)
 
@@ -1919,7 +1938,7 @@ integer function ij_component_of_id(grd, i, j)
   integer :: jg ! Global j-index
 
   ! Using the current grid shape maximizes the numbers of IDs that can be represented
-  ! allowing up to 30-minute uniform global resolution, or potentially finer if non-uniform. 
+  ! allowing up to 30-minute uniform global resolution, or potentially finer if non-uniform.
   iNg = grd%ieg - grd%isg + 1
 
   ig = i + grd%is_offset ! Calculate global i-index
@@ -2315,11 +2334,11 @@ integer :: stderrunit
       posn%lat=this%lat
       posn%k=this%k
 
-      
+
       kspace_copy = this%k_space
       call find_depth(grd,this%k,h,this%depth,this%ine,this%jne,this%xi,this%yj,kspace_copy)
       if (grd%no_TS) then
-         posn%theta = -999.0 
+         posn%theta = -999.0
          posn%salt = -999.0
       elseif (grd%TS_interp) then
           posn%theta = bilin(grd,thetao(:,:,floor(this%k)+1), this%ine, this%jne, this%xi, this%yj)
@@ -2331,7 +2350,7 @@ integer :: stderrunit
 
 !      write(stderrunit,'(a,i3,a,i4,3f12.4)') &
 !                     'particles, theta: pe=(',mpp_pe(),') k, xi, xj, theta', &
-!                     floor(this%k), this%lon, this%lat, posn%theta  
+!                     floor(this%k), this%lon, this%lat, posn%theta
       posn%depth=this%depth
       posn%year=parts%current_year
       posn%day=parts%current_yearday
@@ -3193,13 +3212,13 @@ real, intent(in) :: depth
 real, dimension(:),intent(in) :: hdepth
 !real, intent(out) :: k
 
-!Local                                                                          
+!Local
 integer :: klev
 real :: rdepth
 integer :: stderrunit
 
 
-  ! Get the stderr unit number                                                                                
+  ! Get the stderr unit number
   stderrunit=stderr()
 
 
@@ -3219,8 +3238,14 @@ do klev=2,grd%ke
 enddo
 
 
-write(stderrunit,'(a)')"particles: depth specified is deeper than deepest level"
-write(stderrunit,*) 'depths', hdepth(1), hdepth(2)
+  write(stderrunit,*) 'Particle layer lookup failed on PE: ', mpp_pe()
+  write(stderrunit,*) 'Particle depth: ', depth
+  write(stderrunit,*) 'Number of layers: ', grd%ke
+  write(stderrunit,*) 'Column depth: ', hdepth(grd%ke)
+  flush(stderrunit)
+
+  call error_mesg('find_layer1D', &
+      'Could not determine particle layer; see depth diagnostics', FATAL)
 
 end function find_layer1D
 
@@ -3232,7 +3257,7 @@ subroutine find_layer(grd, depth,hdepth,k,ine,jne,xi,yj,k_space)
 type(particles_gridded), pointer :: grd !< Container for gridded fields
 real, intent(in) :: depth
 real, dimension(:,:,:),intent(in) :: hdepth
-real, intent(out) :: k
+real, intent(inout) :: k
 integer, intent(in) :: ine
 integer, intent(in) :: jne
 real, intent(in) :: xi
@@ -3245,7 +3270,7 @@ integer :: klev
 real :: rdepth
 integer :: stderrunit
 real, dimension(grd%ke) :: hdepth1D
-real, dimension(grd%ke) :: hdepth1Dcum                                                
+real, dimension(grd%ke) :: hdepth1Dcum
 
   ! Get the stderr unit number
   stderrunit=stderr()
@@ -3262,10 +3287,10 @@ do klev=1,grd%ke
         hdepth1Dcum(klev) =hdepth1D(klev)
     else
         hdepth1Dcum(klev)=hdepth1Dcum(klev-1)+hdepth1D(klev)
-    endif 
-enddo 
+    endif
+enddo
 
-   k = find_layer1D(grd, depth,hdepth1Dcum)
+k = find_layer1D(grd, depth,hdepth1Dcum)
 
 k_space=.true.
 
@@ -3290,7 +3315,7 @@ integer :: stderrunit
   ! Get the stderr unit number
 
   stderrunit=stderr()
-  
+
 kint=floor(k)
 
 !if (kint.eq.0)then
@@ -3309,14 +3334,14 @@ enddo
 
 end function find_depth1D
 
-! ############################################################################## 
-!>Finds what depth the particle is at  
+! ##############################################################################
+!>Finds what depth the particle is at
 subroutine find_depth(grd,k,h,depth,ine,jne,xi,yj,k_space)
 !Arguments
-type(particles_gridded), pointer :: grd !< Container for gridded fields 
+type(particles_gridded), pointer :: grd !< Container for gridded fields
 real, intent(in) :: k
 real, dimension(:,:,:),intent(in) :: h
-real, intent(out) :: depth
+real, intent(inout) :: depth
 integer, intent(in) :: ine
 integer, intent(in) :: jne
 real, intent(in) :: xi
@@ -3918,7 +3943,7 @@ integer :: stderrunit
    l1 = xx0*(xi-1)- xx1*xi + xx2*xi + xx3*(1-xi)
    l2 = y0*(yj-1) + y1*(1-yj) + y2*yj-y3*yj
    l3 = y0*(xi-1) - y1*xi + y2 *xi +y3*(1-xi)
-   
+
   jacob2D = l0*l3 - l2*l3
 end function jacob2D
 
@@ -3953,14 +3978,14 @@ logical function unit_tests(parts)
   integer :: stderrunit,i,j,c1,c2
   integer :: k1
   integer(kind=8) :: id
-  real, dimension(parts%grd%ke) :: hdummy 
+  real, dimension(parts%grd%ke) :: hdummy
   real, dimension(parts%grd%ke) :: hddummy
 
   ! This function returns True is a unit test fails
   unit_tests=.false.
   ! For convenience
   grd=>parts%grd
- 
+
  hdummy(1) = 100
  hddummy(1) = 100
   do k1 =2,grd%ke
