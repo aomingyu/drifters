@@ -533,6 +533,7 @@ subroutine particles_framework_init(parts, Grid, Time, dt)
   parts%generate_days=generate_days
   parts%generate_monthly=generate_monthly
   parts%mon_counter=mon_counter
+  parts%num=num
   parts%ignore_missing_restart_parts=ignore_missing_restart_parts
   parts%use_new_predictive_corrective=use_new_predictive_corrective  !Alon
   parts%debug_particle_with_id=debug_particle_with_id
