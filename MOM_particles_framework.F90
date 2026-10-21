@@ -565,7 +565,8 @@ subroutine generate_if_time(parts, Time)
   parts%current_year = iyr
   parts%current_yearday = yearday(iyr, imon, iday, ihr, imin, isec)
 
-  lgenerate = .false.
+  if (3600*ihr + 60*imin + isec == 0) then
+    lgenerate = .false.
   if (parts%generate_monthly)then
     if (imon==parts%mon_counter)then
       lgenerate=.true.

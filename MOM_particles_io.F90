@@ -539,7 +539,7 @@ character(len=1), dimension(1) :: dim_names_1d
                  depth,        &
                  start_lon,    &
                  start_lat,    &
-                 start_d，     &
+                 start_d,      &
                  start_year)
 
     if (replace_drifter_num) then
