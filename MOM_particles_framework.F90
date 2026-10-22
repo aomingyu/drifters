@@ -3233,7 +3233,7 @@ subroutine find_layer(grd, depth,hdepth,k,ine,jne,xi,yj,k_space)
 type(particles_gridded), pointer :: grd !< Container for gridded fields
 real, intent(in) :: depth
 real, dimension(:,:,:),intent(in) :: hdepth
-real, intent(out) :: k
+real, intent(inout) :: k
 integer, intent(in) :: ine
 integer, intent(in) :: jne
 real, intent(in) :: xi
@@ -3317,7 +3317,7 @@ subroutine find_depth(grd,k,h,depth,ine,jne,xi,yj,k_space)
 type(particles_gridded), pointer :: grd !< Container for gridded fields 
 real, intent(in) :: k
 real, dimension(:,:,:),intent(in) :: h
-real, intent(out) :: depth
+real, intent(inout) :: depth
 integer, intent(in) :: ine
 integer, intent(in) :: jne
 real, intent(in) :: xi
