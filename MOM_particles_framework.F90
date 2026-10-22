@@ -558,6 +558,8 @@ subroutine generate_if_time(parts, Time)
   logical :: lerr, lgenerate
   ! Generate a grid of particles if requested
   call get_date(Time, iyr, imon, iday, ihr, imin, isec)
+  parts%current_year=iyr
+  parts%current_yearday=yearday(iyr, imon, iday, ihr, imin, isec)
   if (3600*ihr + 60*imin +isec == 0) then ! Make sure we are on a day boundary
     lgenerate = .false.
     if (parts%generate_monthly)then
@@ -643,6 +645,8 @@ integer :: stderrunit
            if (lres) then
              if (grd%msk(localpart%ine,localpart%jne)>-1.) then
                localpart%drifter_num = parts%num
+               localpart%start_year = parts%current_year
+               localpart%start_day = parts%current_yearday
                localpart%id = generate_id(grd, localpart%ine, localpart%jne)
                lres=pos_within_cell(grd, localpart%lon, localpart%lat,localpart%ine,localpart%jne, localpart%xi, localpart%yj)
                call add_new_part_to_list(parts%list(localpart%ine,localpart%jne)%first, localpart)
