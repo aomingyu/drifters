@@ -150,6 +150,8 @@ integer, allocatable, dimension(:) :: ine,              &
 integer :: grdi, grdj
 type(FmsNetcdfDomainFile_t) :: fileobj         !< Fms2_io fileobj
 integer :: global_nparts
+integer, allocatable, target :: start_year(:)
+real, allocatable, target :: start_day(:)
 character(len=8), dimension(4) :: dim_names_4d
 character(len=8), dimension(3) :: dim_names_3d
 character(len=1), dimension(1) :: dim_names_1d
@@ -180,6 +182,7 @@ character(len=1), dimension(1) :: dim_names_1d
    allocate(start_lon(nparts))
    allocate(start_lat(nparts))
    allocate(start_d(nparts))
+   allocate(start_year(nparts), start_day(nparts))
 
    allocate(ine(nparts))
    allocate(jne(nparts))
@@ -199,6 +202,8 @@ character(len=1), dimension(1) :: dim_names_1d
       ine(i) = this%ine; jne(i) = this%jne
       start_lon(i) = this%start_lon; start_lat(i) = this%start_lat
       start_d(i) = this%depth
+      start_year(i) = this%start_year
+      start_day(i) = this%start_day
       id_cnt(i) = this%id; drifter_num(i) = this%drifter_num !; id_ij(i) = this%id
       call split_id(this%id, id_cnt(i), id_ij(i))
       this=>this%next
@@ -245,6 +250,9 @@ character(len=1), dimension(1) :: dim_names_1d
   call register_restart_field_wrap(fileobj,'drifter_num',drifter_num, &
                                    dim_names_1d,longname='identification of the drifter',units='dimensionless')
 
+  call register_restart_field(fileobj, 'start_year', start_year, dim_names_1d)
+  call register_restart_field(fileobj, 'start_day', start_day, dim_names_1d)
+
   call register_field(fileobj, "i", "int")
   call write_restart(fileobj)
 
@@ -270,6 +278,8 @@ character(len=1), dimension(1) :: dim_names_1d
              drifter_num,       &
              id_cnt,    &
              id_ij) 
+
+  deallocate(start_year, start_day)
 
 end subroutine write_restart_parts
 
@@ -319,6 +329,8 @@ real, dimension(:,:,:),intent(in) :: h
 integer :: n, siz(4), nparts_in_file, nparts_read
 logical :: lres, found_restart, found, replace_drifter_num
 logical :: explain
+integer, allocatable, target :: start_year(:)
+real, allocatable, target :: start_day(:)
 real :: lon0, lon1, lat0, lat1
 real :: pos_is_good, pos_is_good_all_pe
 character(len=53) :: filename
@@ -394,6 +406,7 @@ character(len=1), dimension(1) :: dim_names_1d
     allocate(start_lon(nparts_in_file))
     allocate(start_lat(nparts_in_file))
     allocate(start_d(nparts_in_file))
+    allocate(start_year(nparts_in_file), start_day(nparts_in_file))
     allocate(depth(nparts_in_file))
     replace_drifter_num = variable_exists(fileobj, 'drifter_num') ! True if using a 32-bit drifter_num in restart file
     if (replace_drifter_num) then
@@ -418,6 +431,15 @@ character(len=1), dimension(1) :: dim_names_1d
       call register_restart_field(fileobj, 'id_cnt', id_cnt, dim_names_1d)
       call register_restart_field(fileobj, 'id_ij', id_ij, dim_names_1d)
     endif
+
+    if (.not. variable_exists(fileobj, 'start_year') .or. &
+        .not. variable_exists(fileobj, 'start_day')) then
+      call error_mesg('read_restart_parts', &
+          'Restart is missing particle release dates (start_year/start_day)', FATAL)
+      return
+    endif
+    call register_restart_field(fileobj, 'start_year', start_year, dim_names_1d)
+    call register_restart_field(fileobj, 'start_day', start_day, dim_names_1d)
 
       call read_restart(fileobj)
       call close_file(fileobj)
@@ -451,6 +473,8 @@ character(len=1), dimension(1) :: dim_names_1d
       localpart%start_lon=start_lon(n)
       localpart%start_lat=start_lat(n)
       localpart%start_d=start_d(n)
+      localpart%start_year=start_year(n)
+      localpart%start_day=start_day(n)
       if (replace_drifter_num) then
         localpart%id = generate_id(grd, localpart%ine, localpart%jne)
         localpart%drifter_num = drifter_num(n)
@@ -468,6 +492,7 @@ character(len=1), dimension(1) :: dim_names_1d
   enddo
 
   if (found_restart) then
+    deallocate(start_year, start_day)
     deallocate(lon,          &
                lat,          &
                depth,        &
