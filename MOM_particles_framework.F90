@@ -3224,8 +3224,9 @@ do klev=2,grd%ke
 enddo
 
 
-write(stderrunit,'(a)')"particles: depth specified is deeper than deepest level"
-write(stderrunit,*) 'depths', hdepth(1), hdepth(2)
+write(stderrunit,*) 'Particle depth, column depth: ', depth, hdepth(grd%ke)
+call error_mesg('find_layer1D', &
+    'Could not determine particle layer', FATAL)
 
 end function find_layer1D
 
