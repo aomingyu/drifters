@@ -327,7 +327,7 @@ type(particles_gridded), pointer :: grd=>NULL()
 type(particle) :: localpart
 integer :: stderrunit, i, j, k, cnt, ij
 
-real, allocatable,dimension(:) :: lon, &
+real, allocatable, target, dimension(:) :: lon, &
                                   lat, &
                                   depth,  &
                                   drifter_num,  &
@@ -335,7 +335,7 @@ real, allocatable,dimension(:) :: lon, &
                                   start_lon, &
                                   start_lat, &
                                   start_d
-integer, allocatable, dimension(:) :: id_cnt, &
+integer, allocatable, target, dimension(:) :: id_cnt, &
                                       id_ij
 
 type(FmsNetcdfDomainFile_t) :: fileobj !< Fms2_io fileobj
@@ -402,6 +402,21 @@ character(len=1), dimension(1) :: dim_names_1d
     else
       allocate(id_cnt(nparts_in_file))
       allocate(id_ij(nparts_in_file))
+    endif
+
+    dim_names_1d(1) = 'i'
+    call register_axis(fileobj, 'i', nparts_in_file)
+    call register_restart_field(fileobj, 'lon', lon, dim_names_1d)
+    call register_restart_field(fileobj, 'lat', lat, dim_names_1d)
+    call register_restart_field(fileobj, 'depth', depth, dim_names_1d)
+    call register_restart_field(fileobj, 'start_lon', start_lon, dim_names_1d)
+    call register_restart_field(fileobj, 'start_lat', start_lat, dim_names_1d)
+    call register_restart_field(fileobj, 'start_d', start_d, dim_names_1d)
+    if (replace_drifter_num) then
+      call register_restart_field(fileobj, 'drifter_num', drifter_num, dim_names_1d)
+    else
+      call register_restart_field(fileobj, 'id_cnt', id_cnt, dim_names_1d)
+      call register_restart_field(fileobj, 'id_ij', id_ij, dim_names_1d)
     endif
 
       call read_restart(fileobj)
