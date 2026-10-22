@@ -460,6 +460,9 @@ character(len=1), dimension(1) :: dim_names_1d
       localpart%halo_part=0.
       lres=pos_within_cell(grd, localpart%lon, localpart%lat, localpart%ine, localpart%jne, localpart%xi, localpart%yj)
       localpart%k_space=.false.
+      call find_layer(grd, localpart%depth, h, localpart%k, &
+          localpart%ine, localpart%jne, localpart%xi, localpart%yj, &
+          localpart%k_space)
       call add_new_part_to_list(parts%list(localpart%ine,localpart%jne)%first, localpart)
     endif
   enddo
