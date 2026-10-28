@@ -305,7 +305,7 @@ subroutine particles_framework_init(parts, Grid, Time, dt)
          restart_input_dir, old_bug_bilin,do_unit_tests, force_all_pes_traj, &
          grid_is_latlon,Lx, no_TS, TS_interp, &
          grid_is_regular, &
-         generate_days, generate_monthly, mon_counter, &
+         generate_days, generate_monthly, mon_counter, num, &
          generate_lons, generate_lats, generate_d, &
          ignore_traj, initial_traj, debug_particle_with_id, read_old_restarts
 
